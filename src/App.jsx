@@ -22,8 +22,9 @@ const fmtTime = (seconds) => {
 // Public WebTorrent trackers use WebSocket/WebRTC-compatible transport.
 // UDP/TCP trackers are deliberately not passed to a browser client.
 const DEFAULT_WEBRTC_TRACKERS = [
+  // Public WebTorrent trackers documented for browser/WebRTC peers.
+  // Tracker availability can change; failures are non-fatal.
   'wss://tracker.btorrent.xyz',
-  'wss://tracker.fastcast.nz',
   'wss://tracker.openwebtorrent.com'
 ];
 
@@ -73,21 +74,37 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    (async () => {
-      try {
-        // Load the browser-optimized WebTorrent bundle at runtime. This avoids
-        // Vite bundling Node-only entry points from the npm package.
-        const mod = await import(/* @vite-ignore */ 'https://esm.sh/webtorrent/dist/webtorrent.min.js');
-        const WebTorrentBrowser = mod.default || mod.WebTorrent || mod;
-        if (!active) return;
-        if (typeof WebTorrentBrowser !== 'function') throw new Error('Browser WebTorrent module did not initialize.');
-        clientRef.current = new WebTorrentBrowser();
-        setEngineReady(true);
-        setError('');
-      } catch (e) {
-        if (active) setError(`WebTorrent could not start: ${e.message}. Check your internet connection and reload.`);
+    const loadBrowserEngine = () => new Promise((resolve, reject) => {
+      // Use WebTorrent's documented browser UMD bundle. Loading the npm
+      // package through Vite can pull Node-only modules into the browser build.
+      if (typeof window.WebTorrent === 'function') return resolve(window.WebTorrent);
+      const existing = document.querySelector('script[data-magnetx-webtorrent]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.WebTorrent), { once: true });
+        existing.addEventListener('error', () => reject(new Error('WebTorrent CDN script failed to load.')), { once: true });
+        return;
       }
-    })();
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js';
+      script.async = true;
+      script.dataset.magnetxWebtorrent = 'true';
+      script.onload = () => typeof window.WebTorrent === 'function'
+        ? resolve(window.WebTorrent)
+        : reject(new Error('WebTorrent browser bundle loaded but its API was not found.'));
+      script.onerror = () => reject(new Error('Could not load WebTorrent from jsDelivr. Check your connection or CDN access.'));
+      document.head.appendChild(script);
+    });
+    loadBrowserEngine().then(WebTorrentBrowser => {
+      if (!active) return;
+      if (typeof WebTorrentBrowser.WEBRTC_SUPPORT === 'boolean' && !WebTorrentBrowser.WEBRTC_SUPPORT) {
+        throw new Error('This browser does not support WebRTC data channels.');
+      }
+      clientRef.current = new WebTorrentBrowser();
+      setEngineReady(true);
+      setError('');
+    }).catch(e => {
+      if (active) setError(`WebTorrent could not start: ${e.message}. Open MAGNETX in a current browser over HTTPS and reload.`);
+    });
     return () => {
       active = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -129,7 +146,12 @@ export default function App() {
         t.on('done', () => { setStatus('completed'); setNotice('Torrent download completed.'); });
       });
       torrentRef.current = added;
-      added.on('warning', e => setNotice(`Tracker/peer warning: ${e.message || e}`));
+      added.on('warning', e => {
+        // A single dead tracker must not be treated as a fatal torrent error.
+        // WebTorrent continues discovery through any remaining trackers/peers.
+        const message = e?.message || String(e);
+        setNotice(`Tracker warning (continuing with other sources): ${message}`);
+      });
       added.on('error', e => { setError(e.message || 'Torrent error'); setStatus('error'); });
       connectTimeoutRef.current = setTimeout(() => {
         if (!torrentRef.current || !torrentRef.current.files?.length) {
