@@ -1,0 +1,8 @@
+MAGNETX 2.0 — Vercel settings
+Framework preset: Vite
+Build command: npm run build
+Output directory: dist
+Install command: npm install
+Root directory: ./
+
+Keep package.json, index.html, vite.config.js, and src/ directly in the project root.
