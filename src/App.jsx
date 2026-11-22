@@ -22,10 +22,11 @@ const fmtTime = (seconds) => {
 // Public WebTorrent trackers use WebSocket/WebRTC-compatible transport.
 // UDP/TCP trackers are deliberately not passed to a browser client.
 const DEFAULT_WEBRTC_TRACKERS = [
-  // Public WebTorrent trackers documented for browser/WebRTC peers.
+  // Public WebSocket trackers for browser/WebRTC peers.
   // Tracker availability can change; failures are non-fatal.
-  'wss://tracker.btorrent.xyz',
-  'wss://tracker.openwebtorrent.com'
+  'wss://tracker.openwebtorrent.com',
+  'wss://tracker.webtorrent.dev',
+  'wss://tracker.files.fm:7073/announce'
 ];
 
 const getBrowserTrackers = (magnetUri) => {
